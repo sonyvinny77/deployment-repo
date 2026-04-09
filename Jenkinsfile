@@ -11,8 +11,8 @@ pipeline {
         ARTIFACT_ID = "webapp"
 
         // DEV ENV DETAILS
-        DEV_SERVER  = "172.31.9.86"          // change this
-        DEPLOY_PATH = "/opt/tomcat/webapps/"  // change if needed
+        DEV_SERVER  = "172.31.9.86"
+        DEPLOY_PATH = "/opt/tomcat/webapps/"
     }
 
     stages {
@@ -70,17 +70,20 @@ pipeline {
                     $SSH_USER@$DEV_SERVER:$DEPLOY_PATH
 
                     ssh -i $SSH_KEY -o StrictHostKeyChecking=no \
-                    $SSH_USER@$DEV_SERVER << EOF
+                    $SSH_USER@$DEV_SERVER << 'EOF'
+                        echo "Restarting Tomcat..."
 
-                    echo "Restarting Tomcat..."
-                    sudo systemctl restart tomcat
+                        cd /opt/tomcat/bin
+                        ./shutdown.sh
+                        ./startup.sh
 
-                    echo "Deployment completed on DEV"
+                        echo "Deployment completed on DEV"
                     EOF
                     '''
                 }
             }
         }
+
         stage('Trigger QA Deployment') {
             steps {
                 build job: 'deployment-repo/qa',
