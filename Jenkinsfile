@@ -2,7 +2,6 @@ pipeline {
     agent any
 
     parameters {
-        // Keep this in case someone triggers manually, optional
         string(name: 'APP_VERSION', defaultValue: '', description: 'Docker image version to deploy')
     }
 
@@ -17,7 +16,6 @@ pipeline {
         stage('Determine Version') {
             steps {
                 script {
-                    // If APP_VERSION is empty (upstream did not pass), get latest Docker tag
                     if (!params.APP_VERSION?.trim()) {
                         withCredentials([usernamePassword(
                             credentialsId: 'dockerhub-creds',
@@ -51,22 +49,26 @@ pipeline {
                 script {
                     sshagent(credentials: ['docker-server-ssh']) {
                         sh """
-                        ssh -o StrictHostKeyChecking=no ec2-user@${QA_SERVER} "
+                        ssh -o StrictHostKeyChecking=no ec2-user@${QA_SERVER} '
+                        set -e
 
-                        echo 'Pulling Docker image ${DOCKER_IMAGE}:${APP_VERSION} ...'
+                        echo "Pulling Docker image ${DOCKER_IMAGE}:${APP_VERSION} ..."
                         docker pull ${DOCKER_IMAGE}:${APP_VERSION}
 
-                        echo 'Stopping old container...'
+                        echo "Stopping old container..."
                         docker stop ${CONTAINER_NAME} || true
 
-                        echo 'Removing old container...'
+                        echo "Removing old container..."
                         docker rm ${CONTAINER_NAME} || true
 
-                        echo 'Starting new container...'
+                        echo "Starting new container..."
                         docker run -d -p 8080:8080 --name ${CONTAINER_NAME} ${DOCKER_IMAGE}:${APP_VERSION}
 
-                        echo 'QA Deployment completed successfully'
-                        "
+                        echo "Checking if container started..."
+                        docker ps | grep ${CONTAINER_NAME} || { echo "Container failed to start!"; exit 1; }
+
+                        echo "QA Deployment completed successfully"
+                        '
                         """
                     }
                 }
