@@ -7,7 +7,7 @@ pipeline {
 
     environment {
         DOCKER_IMAGE = "sony9014/mydeploy"
-        CONTAINER_NAME = "app"
+        CONTAINER_NAME = "app-qa"
         QA_SERVER = "3.144.107.40"
     }
 
@@ -45,7 +45,7 @@ pipeline {
                         echo 'Starting new container...'
                         docker run -d -p 8080:8080 --name ${CONTAINER_NAME} ${DOCKER_IMAGE}:${params.APP_VERSION}
 
-                        echo 'QA Deployment successful'
+                        echo 'QA Deployment completed successfully'
                         "
                         """
                     }
