@@ -33,6 +33,7 @@ pipeline {
             }
         }
 
+        // ✅ FIXED
         stage('Download Artifact from Nexus') {
             steps {
                 withCredentials([usernamePassword(
@@ -45,15 +46,23 @@ pipeline {
 
                     GROUP_PATH=$(echo $GROUP_ID | tr '.' '/')
 
-                    curl -u $NEXUS_USER:$NEXUS_PASS -O \
+                    curl -f -u $NEXUS_USER:$NEXUS_PASS -O \
                     $NEXUS_URL/repository/maven-releases/$GROUP_PATH/$ARTIFACT_ID/$VERSION/${ARTIFACT_ID}-${VERSION}.war
 
-                    ls -l
+                    echo "📦 Validating artifact..."
+
+                    if [ ! -s ${ARTIFACT_ID}-${VERSION}.war ]; then
+                        echo "❌ Artifact download failed or empty"
+                        exit 1
+                    fi
+
+                    ls -lh
                     '''
                 }
             }
         }
 
+        // ✅ FIXED DEPLOYMENT
         stage('Deploy to PREPROD Server') {
             steps {
                 withCredentials([sshUserPrivateKey(
@@ -61,24 +70,32 @@ pipeline {
                     keyFileVariable: 'SSH_KEY',
                     usernameVariable: 'SSH_USER'
                 )]) {
-                    sh '''
+                    sh """
                     echo "🚀 Deploying to PREPROD server..."
 
-                    scp -i $SSH_KEY -o StrictHostKeyChecking=no \
+                    scp -i \$SSH_KEY -o StrictHostKeyChecking=no \
                     ${ARTIFACT_ID}-${VERSION}.war \
-                    $SSH_USER@$PREPROD_SERVER:$DEPLOY_PATH
+                    \$SSH_USER@${PREPROD_SERVER}:${DEPLOY_PATH}
 
-                    ssh -i $SSH_KEY -o StrictHostKeyChecking=no \
-                    $SSH_USER@$PREPROD_SERVER << 'EOF'
-                        echo "Restarting Tomcat..."
+                    ssh -i \$SSH_KEY -o StrictHostKeyChecking=no \
+                    \$SSH_USER@${PREPROD_SERVER} << 'EOF'
 
-                        cd /opt/tomcat/bin
-                        ./shutdown.sh
-                        ./startup.sh
+                        echo "🛑 Stopping Tomcat..."
+                        sudo systemctl stop tomcat || true
 
-                        echo "Deployment completed on PREPROD"
+                        echo "🧹 Cleaning old deployment..."
+                        rm -rf /opt/tomcat/webapps/webapp*
+
+                        echo "📦 Deploying new WAR..."
+                        mv /opt/tomcat/webapps/webapp-${VERSION}.war /opt/tomcat/webapps/webapp.war
+
+                        echo "🚀 Starting Tomcat..."
+                        sudo systemctl start tomcat
+
+                        echo "✅ Deployment completed on PREPROD"
+
                     EOF
-                    '''
+                    """
                 }
             }
         }
