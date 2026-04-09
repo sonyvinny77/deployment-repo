@@ -10,7 +10,7 @@ pipeline {
         GROUP_ID    = "com.example.maven-project"
         ARTIFACT_ID = "webapp"
 
-        PROD_SERVER = "172.31.5.86"        // change this
+        PROD_SERVER = "172.31.5.86"
         DEPLOY_PATH = "/opt/tomcat/webapps/"
     }
 
@@ -41,10 +41,14 @@ pipeline {
                     passwordVariable: 'NEXUS_PASS'
                 )]) {
                     sh '''
+                    echo "⬇️ Downloading artifact from Nexus..."
+
                     GROUP_PATH=$(echo $GROUP_ID | tr '.' '/')
 
                     curl -u $NEXUS_USER:$NEXUS_PASS -O \
                     $NEXUS_URL/repository/maven-releases/$GROUP_PATH/$ARTIFACT_ID/$VERSION/${ARTIFACT_ID}-${VERSION}.war
+
+                    ls -l
                     '''
                 }
             }
@@ -58,13 +62,21 @@ pipeline {
                     usernameVariable: 'SSH_USER'
                 )]) {
                     sh '''
+                    echo "🚀 Deploying to PROD server..."
+
                     scp -i $SSH_KEY -o StrictHostKeyChecking=no \
                     ${ARTIFACT_ID}-${VERSION}.war \
                     $SSH_USER@$PROD_SERVER:$DEPLOY_PATH
 
                     ssh -i $SSH_KEY -o StrictHostKeyChecking=no \
-                    $SSH_USER@$PROD_SERVER << EOF
-                    sudo systemctl restart tomcat
+                    $SSH_USER@$PROD_SERVER << 'EOF'
+                        echo "Restarting Tomcat..."
+
+                        cd /opt/tomcat/bin
+                        ./shutdown.sh
+                        ./startup.sh
+
+                        echo "Deployment completed on PROD"
                     EOF
                     '''
                 }
