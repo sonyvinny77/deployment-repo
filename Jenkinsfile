@@ -1,70 +1,66 @@
 pipeline {
     agent any
 
-    parameters { string(name: 'VERSION', description: 'Release version to deploy') }
+    parameters {
+        string(name: 'APP_VERSION', description: 'Docker image version to deploy')
+    }
 
     environment {
-        NEXUS_URL   = "http://172.31.42.87:8081"
-        GROUP_ID    = "com.example.maven-project"
-        ARTIFACT_ID = "webapp"
-
-        QA_SERVER   = "172.31.9.251"
-        DEPLOY_PATH = "/opt/tomcat/webapps/"
+        DOCKER_IMAGE = "sony9014/mydeploy"
+        CONTAINER_NAME = "app"
+        QA_SERVER = "3.144.107.40"
     }
 
     stages {
+
         stage('Validate Input') {
             steps {
                 script {
-                    if (!params.VERSION) { error "❌ VERSION is required!" }
-                    if (params.VERSION.contains("SNAPSHOT")) { error "❌ SNAPSHOT not allowed!" }
-                    env.VERSION = params.VERSION
-                    echo "🚀 Deploying Version: ${VERSION} to QA"
-                }
-            }
-        }
-
-        stage('Download Artifact from Nexus') {
-            steps {
-                withCredentials([usernamePassword(credentialsId: 'nexus-creds',
-                                                 usernameVariable: 'NEXUS_USER',
-                                                 passwordVariable: 'NEXUS_PASS')]) {
-                    sh """
-                    echo "⬇️ Downloading artifact..."
-                    GROUP_PATH=\$(echo $GROUP_ID | tr '.' '/')
-                    curl -f -u \$NEXUS_USER:\$NEXUS_PASS -O \
-                    \$NEXUS_URL/repository/maven-releases/\$GROUP_PATH/\$ARTIFACT_ID/\$VERSION/\${ARTIFACT_ID}-\$VERSION.war
-                    ls -lh
-                    """
+                    if (!params.APP_VERSION) {
+                        error "APP_VERSION is required!"
+                    }
+                    echo "Deploying Version to QA: ${params.APP_VERSION}"
                 }
             }
         }
 
         stage('Deploy to QA Server') {
             steps {
-                withCredentials([sshUserPrivateKey(credentialsId: 'docker-server-ssh',
-                                                   keyFileVariable: 'SSH_KEY',
-                                                   usernameVariable: 'SSH_USER')]) {
-                    sh """
-                    echo "🚀 Copying WAR to QA server..."
-                    scp -i \$SSH_KEY -o StrictHostKeyChecking=no \${ARTIFACT_ID}-\$VERSION.war \$SSH_USER@$QA_SERVER:\$DEPLOY_PATH
-                    echo "✅ Deployment completed on QA"
-                    """
-                }
-            }
-        }
+                script {
 
-        stage('Trigger PREPROD Deployment') {
-            steps {
-                build job: 'deployment-repo/preprod',
-                      wait: false,
-                      parameters: [string(name: 'VERSION', value: "${VERSION}")]
+                    sshagent(credentials: ['docker-server-ssh']) {
+
+                        sh """
+                        ssh -o StrictHostKeyChecking=no ec2-user@${QA_SERVER} "
+
+                        echo 'Pulling image...'
+                        docker pull ${DOCKER_IMAGE}:${params.APP_VERSION}
+
+                        echo 'Stopping old container...'
+                        docker stop ${CONTAINER_NAME} || true
+
+                        echo 'Removing old container...'
+                        docker rm ${CONTAINER_NAME} || true
+
+                        echo 'Starting new container...'
+                        docker run -d -p 8080:8080 --name ${CONTAINER_NAME} ${DOCKER_IMAGE}:${params.APP_VERSION}
+
+                        echo 'QA Deployment successful'
+                        "
+                        """
+                    }
+                }
             }
         }
     }
 
     post {
-        success { echo "✅ QA Deployment Successful" }
-        failure { echo "❌ QA Deployment Failed" }
+        success {
+            echo "✅ QA Deployment Successful"
+        }
+
+        failure {
+            echo "❌ QA Deployment Failed"
+        }
     }
 }
