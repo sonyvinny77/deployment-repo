@@ -2,7 +2,8 @@ pipeline {
     agent any
 
     parameters {
-        string(name: 'APP_VERSION', description: 'Docker image version to deploy')
+        // Keep this in case someone triggers manually, optional
+        string(name: 'APP_VERSION', defaultValue: '', description: 'Docker image version to deploy')
     }
 
     environment {
@@ -13,13 +14,34 @@ pipeline {
 
     stages {
 
-        stage('Validate Input') {
+        stage('Determine Version') {
             steps {
                 script {
-                    if (!params.APP_VERSION) {
-                        error "APP_VERSION is required!"
+                    // If APP_VERSION is empty (upstream did not pass), get latest Docker tag
+                    if (!params.APP_VERSION?.trim()) {
+                        withCredentials([usernamePassword(
+                            credentialsId: 'dockerhub-creds',
+                            usernameVariable: 'DOCKER_USER',
+                            passwordVariable: 'DOCKER_PASS'
+                        )]) {
+                            env.APP_VERSION = sh(
+                                script: """
+                                    echo \$DOCKER_PASS | docker login -u \$DOCKER_USER --password-stdin
+                                    curl -s -u \$DOCKER_USER:\$DOCKER_PASS https://hub.docker.com/v2/repositories/${DOCKER_IMAGE}/tags?page_size=100 | \
+                                    jq -r '.results[].name' | sort -V | tail -n1
+                                """,
+                                returnStdout: true
+                            ).trim()
+                        }
+                        echo "Auto-detected latest Docker version: ${env.APP_VERSION}"
+                    } else {
+                        env.APP_VERSION = params.APP_VERSION
+                        echo "Using APP_VERSION from upstream: ${env.APP_VERSION}"
                     }
-                    echo "Deploying Version to QA: ${params.APP_VERSION}"
+
+                    if (!env.APP_VERSION) {
+                        error "No Docker version found!"
+                    }
                 }
             }
         }
@@ -27,14 +49,12 @@ pipeline {
         stage('Deploy to QA Server') {
             steps {
                 script {
-
                     sshagent(credentials: ['docker-server-ssh']) {
-
                         sh """
                         ssh -o StrictHostKeyChecking=no ec2-user@${QA_SERVER} "
 
-                        echo 'Pulling image...'
-                        docker pull ${DOCKER_IMAGE}:${params.APP_VERSION}
+                        echo 'Pulling Docker image ${DOCKER_IMAGE}:${APP_VERSION} ...'
+                        docker pull ${DOCKER_IMAGE}:${APP_VERSION}
 
                         echo 'Stopping old container...'
                         docker stop ${CONTAINER_NAME} || true
@@ -43,7 +63,7 @@ pipeline {
                         docker rm ${CONTAINER_NAME} || true
 
                         echo 'Starting new container...'
-                        docker run -d -p 8080:8080 --name ${CONTAINER_NAME} ${DOCKER_IMAGE}:${params.APP_VERSION}
+                        docker run -d -p 8080:8080 --name ${CONTAINER_NAME} ${DOCKER_IMAGE}:${APP_VERSION}
 
                         echo 'QA Deployment completed successfully'
                         "
@@ -58,7 +78,6 @@ pipeline {
         success {
             echo "✅ QA Deployment Successful"
         }
-
         failure {
             echo "❌ QA Deployment Failed"
         }
