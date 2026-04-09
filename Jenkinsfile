@@ -10,6 +10,10 @@ pipeline {
         DEV_SERVER   = "172.31.9.86"
         CONTAINER_NAME = "myyapp"
         PORT = "8080"
+        NEXUS_URL   = "http://172.31.42.87:8081"
+        GROUP_ID    = "com.example.maven-project"
+        ARTIFACT_ID = "webapp"
+        DEPLOY_PATH = "/opt/tomcat/webapps/
     }
 
     stages {
@@ -22,6 +26,23 @@ pipeline {
                     }
                     env.APP_VERSION = params.APP_VERSION
                     echo "🚀 Deploying ${DOCKER_IMAGE}:${APP_VERSION} to DEV"
+                }
+            }
+        }
+        stage('Download Artifact from Nexus') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'nexus-creds',
+                    usernameVariable: 'NEXUS_USER',
+                    passwordVariable: 'NEXUS_PASS'
+                )]) {
+                    sh '''
+                        echo "⬇️ Downloading artifact from Nexus..."
+                        GROUP_PATH=$(echo $GROUP_ID | tr '.' '/')
+                        curl -f -u $NEXUS_USER:$NEXUS_PASS -O \
+                            $NEXUS_URL/repository/maven-releases/$GROUP_PATH/$ARTIFACT_ID/$VERSION/${ARTIFACT_ID}-${VERSION}.war
+                        ls -lh
+                    '''
                 }
             }
         }
