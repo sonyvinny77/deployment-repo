@@ -10,7 +10,6 @@ pipeline {
         GROUP_ID    = "com.example.maven-project"
         ARTIFACT_ID = "webapp"
 
-        // DEV ENV DETAILS
         DEV_SERVER  = "172.31.9.86"
         DEPLOY_PATH = "/opt/tomcat/webapps/"
     }
@@ -34,6 +33,7 @@ pipeline {
             }
         }
 
+        // ✅ FIXED
         stage('Download Artifact from Nexus') {
             steps {
                 withCredentials([usernamePassword(
@@ -46,15 +46,23 @@ pipeline {
 
                     GROUP_PATH=$(echo $GROUP_ID | tr '.' '/')
 
-                    curl -u $NEXUS_USER:$NEXUS_PASS -O \
+                    curl -f -u $NEXUS_USER:$NEXUS_PASS -O \
                     $NEXUS_URL/repository/maven-releases/$GROUP_PATH/$ARTIFACT_ID/$VERSION/${ARTIFACT_ID}-${VERSION}.war
 
-                    ls -l
+                    echo "📦 Checking artifact..."
+
+                    if [ ! -s ${ARTIFACT_ID}-${VERSION}.war ]; then
+                        echo "❌ Artifact download failed or empty"
+                        exit 1
+                    fi
+
+                    ls -lh
                     '''
                 }
             }
         }
 
+        // ✅ FIXED
         stage('Deploy to DEV Server') {
             steps {
                 withCredentials([sshUserPrivateKey(
@@ -62,24 +70,34 @@ pipeline {
                     keyFileVariable: 'SSH_KEY',
                     usernameVariable: 'SSH_USER'
                 )]) {
-                    sh '''
+                    sh """
                     echo "🚀 Deploying to DEV server..."
 
-                    scp -i $SSH_KEY -o StrictHostKeyChecking=no \
+                    # Copy artifact
+                    scp -i \$SSH_KEY -o StrictHostKeyChecking=no \
                     ${ARTIFACT_ID}-${VERSION}.war \
-                    $SSH_USER@$DEV_SERVER:$DEPLOY_PATH
+                    \$SSH_USER@${DEV_SERVER}:${DEPLOY_PATH}
 
-                    ssh -i $SSH_KEY -o StrictHostKeyChecking=no \
-                    $SSH_USER@$DEV_SERVER << 'EOF'
-                        echo "Restarting Tomcat..."
+                    # Remote deployment
+                    ssh -i \$SSH_KEY -o StrictHostKeyChecking=no \
+                    \$SSH_USER@${DEV_SERVER} << 'EOF'
 
-                        cd /opt/tomcat/bin
-                        ./shutdown.sh
-                        ./startup.sh
+                        echo "🛑 Stopping Tomcat..."
+                        sudo systemctl stop tomcat || true
 
-                        echo "Deployment completed on DEV"
+                        echo "🧹 Cleaning old deployment..."
+                        rm -rf /opt/tomcat/webapps/webapp*
+
+                        echo "📦 Deploying new WAR..."
+                        mv /opt/tomcat/webapps/webapp-${VERSION}.war /opt/tomcat/webapps/webapp.war
+
+                        echo "🚀 Starting Tomcat..."
+                        sudo systemctl start tomcat
+
+                        echo "✅ Deployment completed on DEV"
+
                     EOF
-                    '''
+                    """
                 }
             }
         }
