@@ -1,54 +1,41 @@
 pipeline {
     agent any
 
-    parameters { string(name: 'VERSION', description: 'Release version to deploy') }
+    parameters {
+        string(name: 'APP_VERSION', description: 'Docker image tag to deploy (ex: 1.0.0)')
+    }
 
     environment {
-        NEXUS_URL   = "http://172.31.42.87:8081"
-        GROUP_ID    = "com.example.maven-project"
-        ARTIFACT_ID = "webapp"
-
-        DEV_SERVER  = "172.31.9.86"
-        DEPLOY_PATH = "/opt/tomcat/webapps/"
+        DOCKER_IMAGE = "sony9014/mydeploy"
+        DEV_SERVER   = "172.31.9.86"
+        CONTAINER_NAME = "myyapp"
+        PORT = "8080"
     }
 
     stages {
+
         stage('Validate Input') {
             steps {
                 script {
-                    if (!params.VERSION) { error "❌ VERSION is required!" }
-                    if (params.VERSION.contains("SNAPSHOT")) { error "❌ SNAPSHOT not allowed!" }
-                    env.VERSION = params.VERSION
-                    echo "🚀 Deploying Version: ${VERSION} to DEV"
+                    if (!params.APP_VERSION) {
+                        error "❌ APP_VERSION is required!"
+                    }
+                    env.APP_VERSION = params.APP_VERSION
+                    echo "🚀 Deploying ${DOCKER_IMAGE}:${APP_VERSION} to DEV"
                 }
             }
         }
 
-        stage('Download Artifact from Nexus') {
+        stage('Deploy to DEV') {
             steps {
-                withCredentials([usernamePassword(credentialsId: 'nexus-creds',
-                                                 usernameVariable: 'NEXUS_USER',
-                                                 passwordVariable: 'NEXUS_PASS')]) {
+                sshagent(['docker-server-ssh']) {
                     sh """
-                    echo "⬇️ Downloading artifact..."
-                    GROUP_PATH=\$(echo $GROUP_ID | tr '.' '/')
-                    curl -f -u \$NEXUS_USER:\$NEXUS_PASS -O \
-                    \$NEXUS_URL/repository/maven-releases/\$GROUP_PATH/\$ARTIFACT_ID/\$VERSION/\${ARTIFACT_ID}-\$VERSION.war
-                    ls -lh
-                    """
-                }
-            }
-        }
-
-        stage('Deploy to DEV Server') {
-            steps {
-                withCredentials([sshUserPrivateKey(credentialsId: 'docker-server-ssh',
-                                                   keyFileVariable: 'SSH_KEY',
-                                                   usernameVariable: 'SSH_USER')]) {
-                    sh """
-                    echo "🚀 Copying WAR to DEV server..."
-                    scp -i \$SSH_KEY -o StrictHostKeyChecking=no \${ARTIFACT_ID}-\$VERSION.war \$SSH_USER@$DEV_SERVER:\$DEPLOY_PATH
-                    echo "✅ Deployment completed on DEV"
+                    ssh -o StrictHostKeyChecking=no ec2-user@${DEV_SERVER} "
+                        docker pull ${DOCKER_IMAGE}:${APP_VERSION} &&
+                        docker stop ${CONTAINER_NAME} || true &&
+                        docker rm ${CONTAINER_NAME} || true &&
+                        docker run -d -p ${PORT}:8080 --name ${CONTAINER_NAME} ${DOCKER_IMAGE}:${APP_VERSION}
+                    "
                     """
                 }
             }
@@ -57,8 +44,10 @@ pipeline {
         stage('Trigger QA Deployment') {
             steps {
                 build job: 'deployment-repo/qa',
-                      wait: false,
-                      parameters: [string(name: 'VERSION', value: "${VERSION}")]
+                wait: false,
+                parameters: [
+                    string(name: 'APP_VERSION', value: "${APP_VERSION}")
+                ]
             }
         }
     }
