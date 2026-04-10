@@ -6,9 +6,9 @@ pipeline {
     }
 
     environment {
-        DOCKER_IMAGE = "sony9014/mydeploy"
+        DOCKER_IMAGE   = "sony9014/mydeploy"
         CONTAINER_NAME = "app-qa"
-        QA_SERVER = "16.58.212.42"
+        QA_SERVER      = "16.58.212.42"
     }
 
     stages {
@@ -17,29 +17,11 @@ pipeline {
             steps {
                 script {
                     if (!params.APP_VERSION?.trim()) {
-                        withCredentials([usernamePassword(
-                            credentialsId: 'dockerhub-creds',
-                            usernameVariable: 'DOCKER_USER',
-                            passwordVariable: 'DOCKER_PASS'
-                        )]) {
-                            env.APP_VERSION = sh(
-                                script: """
-                                    echo \$DOCKER_PASS | docker login -u \$DOCKER_USER --password-stdin
-                                    curl -s -u \$DOCKER_USER:\$DOCKER_PASS https://hub.docker.com/v2/repositories/${DOCKER_IMAGE}/tags?page_size=100 | \
-                                    jq -r '.results[].name' | sort -V | tail -n1
-                                """,
-                                returnStdout: true
-                            ).trim()
-                        }
-                        echo "Auto-detected latest Docker version: ${env.APP_VERSION}"
-                    } else {
-                        env.APP_VERSION = params.APP_VERSION
-                        echo "Using APP_VERSION from upstream: ${env.APP_VERSION}"
+                        error "APP_VERSION not received from upstream!"
                     }
 
-                    if (!env.APP_VERSION) {
-                        error "No Docker version found!"
-                    }
+                    env.APP_VERSION = params.APP_VERSION
+                    echo "Using APP_VERSION from upstream: ${env.APP_VERSION}"
                 }
             }
         }
