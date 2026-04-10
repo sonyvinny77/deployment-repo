@@ -1,70 +1,69 @@
 pipeline {
     agent any
 
-    parameters { string(name: 'VERSION', description: 'Release version to deploy') }
+    parameters {
+        string(name: 'APP_VERSION', defaultValue: '', description: 'Docker image version to deploy')
+    }
 
     environment {
-        NEXUS_URL      = "http://172.31.42.87:8081"
-        GROUP_ID       = "com.example.maven-project"
-        ARTIFACT_ID    = "webapp"
-
-        PREPROD_SERVER = "172.31.1.212"
-        DEPLOY_PATH    = "/opt/tomcat/webapps/"
+        DOCKER_IMAGE   = "sony9014/mydeploy"
+        CONTAINER_NAME = "app-preprod"
+        PREPROD_SERVER = "3.148.108.175"
     }
 
     stages {
-        stage('Validate Input') {
+
+        stage('Determine Version') {
             steps {
                 script {
-                    if (!params.VERSION) { error "❌ VERSION is required!" }
-                    if (params.VERSION.contains("SNAPSHOT")) { error "❌ SNAPSHOT not allowed!" }
-                    env.VERSION = params.VERSION
-                    echo "🚀 Deploying Version: ${VERSION} to PREPROD"
+                    if (!params.APP_VERSION?.trim()) {
+                        error "APP_VERSION not received from upstream!"
+                    }
+
+                    env.APP_VERSION = params.APP_VERSION
+                    echo "Using APP_VERSION from upstream: ${env.APP_VERSION}"
                 }
             }
         }
 
-        stage('Download Artifact from Nexus') {
+        stage('Deploy to PreProd Server') {
             steps {
-                withCredentials([usernamePassword(credentialsId: 'nexus-creds',
-                                                 usernameVariable: 'NEXUS_USER',
-                                                 passwordVariable: 'NEXUS_PASS')]) {
-                    sh """
-                    echo "⬇️ Downloading artifact..."
-                    GROUP_PATH=\$(echo $GROUP_ID | tr '.' '/')
-                    curl -f -u \$NEXUS_USER:\$NEXUS_PASS -O \
-                    \$NEXUS_URL/repository/maven-releases/\$GROUP_PATH/\$ARTIFACT_ID/\$VERSION/\${ARTIFACT_ID}-\$VERSION.war
-                    ls -lh
-                    """
-                }
-            }
-        }
+                script {
+                    sshagent(credentials: ['docker-server-ssh']) {
+                        sh """
+                        ssh -o StrictHostKeyChecking=no ec2-user@${PREPROD_SERVER} '
+                        set -e
 
-        stage('Deploy to PREPROD Server') {
-            steps {
-                withCredentials([sshUserPrivateKey(credentialsId: 'docker-server-ssh',
-                                                   keyFileVariable: 'SSH_KEY',
-                                                   usernameVariable: 'SSH_USER')]) {
-                    sh """
-                    echo "🚀 Copying WAR to PREPROD server..."
-                    scp -i \$SSH_KEY -o StrictHostKeyChecking=no \${ARTIFACT_ID}-\$VERSION.war \$SSH_USER@$PREPROD_SERVER:\$DEPLOY_PATH
-                    echo "✅ Deployment completed on PREPROD"
-                    """
-                }
-            }
-        }
+                        echo "Pulling Docker image ${DOCKER_IMAGE}:${APP_VERSION} ..."
+                        docker pull ${DOCKER_IMAGE}:${APP_VERSION}
 
-        stage('Trigger PROD Deployment') {
-            steps {
-                build job: 'deployment-repo/prod',
-                      wait: false,
-                      parameters: [string(name: 'VERSION', value: "${VERSION}")]
+                        echo "Stopping old container..."
+                        docker stop ${CONTAINER_NAME} || true
+
+                        echo "Removing old container..."
+                        docker rm ${CONTAINER_NAME} || true
+
+                        echo "Starting new container..."
+                        docker run -d -p 8081:8080 --name ${CONTAINER_NAME} ${DOCKER_IMAGE}:${APP_VERSION}
+
+                        echo "Checking if container started..."
+                        docker ps | grep ${CONTAINER_NAME} || { echo "Container failed to start!"; exit 1; }
+
+                        echo "PreProd Deployment completed successfully"
+                        '
+                        """
+                    }
+                }
             }
         }
     }
 
     post {
-        success { echo "✅ PREPROD Deployment Successful" }
-        failure { echo "❌ PREPROD Deployment Failed" }
+        success {
+            echo "✅ PreProd Deployment Successful"
+        }
+        failure {
+            echo "❌ PreProd Deployment Failed"
+        }
     }
 }
