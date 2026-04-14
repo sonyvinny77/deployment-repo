@@ -8,7 +8,7 @@ pipeline {
     environment {
         DOCKER_IMAGE   = "sony9014/mydeploy"
         CONTAINER_NAME = "app-qa"
-        QA_SERVER      = "16.58.212.42"
+        QA_SERVER      = "3.15.1.79"
     }
 
     stages {
