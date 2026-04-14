@@ -8,7 +8,7 @@ pipeline {
     environment {
         DOCKER_IMAGE   = "sony9014/mydeploy"
         CONTAINER_NAME = "app-preprod"
-        PREPROD_SERVER = "3.148.108.175"
+        PREPROD_SERVER = "3.138.67.21"
     }
 
     stages {
