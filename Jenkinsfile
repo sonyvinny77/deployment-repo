@@ -43,7 +43,7 @@ pipeline {
                         docker rm ${CONTAINER_NAME} || true
 
                         echo 'Starting new container...'
-                        docker run -d -p 8080:8080 --name ${CONTAINER_NAME} ${DOCKER_IMAGE}:${params.APP_VERSION}
+                        docker run -d -p 8084:8080 --name ${CONTAINER_NAME} ${DOCKER_IMAGE}:${params.APP_VERSION}
 
                         echo 'Deployment completed successfully'
                         "
