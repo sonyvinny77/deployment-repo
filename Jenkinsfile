@@ -44,7 +44,7 @@ pipeline {
                         docker rm ${CONTAINER_NAME} || true
 
                         echo "Starting new container..."
-                        docker run -d -p 8085:8085 --name ${CONTAINER_NAME} ${DOCKER_IMAGE}:${APP_VERSION}
+                        docker run -d -p 8085:8080 --name ${CONTAINER_NAME} ${DOCKER_IMAGE}:${APP_VERSION}
 
                         echo "Checking if container started..."
                         docker ps | grep ${CONTAINER_NAME} || { echo "Container failed to start!"; exit 1; }
