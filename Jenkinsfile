@@ -8,7 +8,7 @@ pipeline {
     environment {
         DOCKER_IMAGE   = "sony9014/mydeploy"
         CONTAINER_NAME = "app-prod"
-        PROD_SERVER    = "18.225.92.252"
+        PROD_SERVER    = "3.147.238.46"
     }
 
     stages {
